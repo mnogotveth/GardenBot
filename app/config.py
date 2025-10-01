@@ -18,11 +18,9 @@ class Settings(BaseModel):
     visits_poll_interval_seconds: int = int(os.getenv("VISITS_POLL_INTERVAL_SECONDS", "300"))
     visits_lookback_days: int = int(os.getenv("VISITS_LOOKBACK_DAYS", "30"))
 
-    # Меню
     menu_url: str = os.getenv("MENU_URL", "")
     menu_webapp_url: str = os.getenv("MENU_WEBAPP_URL", "")
 
-    # Согласие на ПДн
     consent_webapp_url: str = os.getenv("CONSENT_WEBAPP_ID", "")   
     policy_url: str = os.getenv("POLICY_URL", "")
     policy_file_id: str = os.getenv("POLICY_FILE_ID", "")                   

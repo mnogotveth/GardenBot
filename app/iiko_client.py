@@ -8,15 +8,12 @@ BASE = settings.iiko_api_base
 
 PATH_TOKEN       = "/api/1/access_token"
 PATH_ORGS        = "/api/1/organizations"
-# loyalty-роуты
 PATH_CUST_FIND   = "/api/1/loyalty/iiko/customer/info"
 PATH_CUST_CREATE = "/api/1/loyalty/iiko/customer/create_or_update"
 PATH_BALANCE     = "/api/1/loyalty/balance"
-# оставляем как есть; /orders/by_phone может быть закрыт правами
 PATH_REFILL      = "/api/1/customers/refill_balance"
 PATH_ORDERS      = "/api/1/orders/by_phone"
 
-# ---- безопасный дебаг-лог (маскируем ПДн) ----
 def _mask_phone(p: str) -> str:
     if not p:
         return ""
@@ -37,7 +34,6 @@ class IikoClient:
     def __init__(self):
         self._token: str | None = None
 
-    # ---------- низкий уровень ----------
     async def _refresh_token(self):
         async with httpx.AsyncClient(timeout=20) as r:
             resp = await r.post(f"{BASE}{PATH_TOKEN}", json={"apiLogin": settings.iiko_api_login})
@@ -60,12 +56,10 @@ class IikoClient:
             return resp
         raise RuntimeError("unreachable")
 
-    # ---------- служебное ----------
     async def ping(self) -> Dict[str, Any]:
         resp = await self._request(PATH_ORGS, {"apiLogin": settings.iiko_api_login})
         return resp.json()
-
-    # ---------- клиенты ----------
+    
     async def _find_by_phone(self, phone: str) -> dict | None:
         org_id = str(settings.iiko_org_id)
         payloads = [
@@ -207,7 +201,6 @@ class IikoClient:
             return int(round(best["balance"]))
         return int(round(sum(w["balance"] for w in wallets)))
 
-    # ---------- прочее ----------
     async def refill_bonus(self, customer_id: Any, amount: int, comment: str = "Welcome bonus"):
         org_id = str(settings.iiko_org_id)
         cust_id = str(customer_id)
