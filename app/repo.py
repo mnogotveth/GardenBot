@@ -73,18 +73,39 @@ class Repo:
             return (await c.fetchrow(q, tg_id, order_id)) is not None
 
     async def add_visit(self, tg_id: int, order_id: str, visited_at: datetime,
-                        bonuses_spent: int, bonuses_earned: int, amount: float, meta: dict):
+                        bonuses_spent: int, bonuses_earned: int, amount: float, meta: dict) -> int:
         q = """
         INSERT INTO visits (tg_id, order_id, visited_at, bonuses_spent, bonuses_earned, amount, meta)
         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id
         """
         async with self.pool.acquire() as c:
-            await c.execute(q, tg_id, order_id, visited_at, bonuses_spent, bonuses_earned, amount, meta)
+            return await c.fetchval(q, tg_id, order_id, visited_at, bonuses_spent, bonuses_earned, amount, meta)
 
     async def list_visits(self, tg_id: int, limit: int = 10) -> List[asyncpg.Record]:
         q = "SELECT * FROM visits WHERE tg_id=$1 ORDER BY visited_at DESC LIMIT $2"
         async with self.pool.acquire() as c:
             return await c.fetch(q, tg_id, limit)
+
+    async def get_last_balance_visit(self, tg_id: int) -> Optional[asyncpg.Record]:
+        q = """
+        SELECT * FROM visits
+        WHERE tg_id=$1 AND meta ->> 'source' = 'balance_change'
+        ORDER BY visited_at DESC
+        LIMIT 1
+        """
+        async with self.pool.acquire() as c:
+            return await c.fetchrow(q, tg_id)
+
+    async def update_visit_amounts(self, visit_id: int, bonuses_spent: int,
+                                   bonuses_earned: int, visited_at: datetime):
+        q = """
+        UPDATE visits
+        SET bonuses_spent=$2, bonuses_earned=$3, visited_at=$4
+        WHERE id=$1
+        """
+        async with self.pool.acquire() as c:
+            await c.execute(q, visit_id, bonuses_spent, bonuses_earned, visited_at)
 
     # --- Consent ---
     async def set_consent(self, tg_id: int):

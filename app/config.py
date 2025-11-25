@@ -25,4 +25,8 @@ class Settings(BaseModel):
     policy_url: str = os.getenv("POLICY_URL", "")
     policy_file_id: str = os.getenv("POLICY_FILE_ID", "")                   
 
+    visits_debug_log: bool = os.getenv("VISITS_DEBUG_LOG", "false").lower() == "true"
+    _rows_count = int(os.getenv("VISITS_HISTORY_ROWS_COUNT", "200"))
+    visits_history_rows_count: int = min(max(_rows_count, 1), 200)
+
 settings = Settings()

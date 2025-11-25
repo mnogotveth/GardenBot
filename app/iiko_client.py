@@ -245,6 +245,9 @@ PATH_CUST_CREATE = "/api/1/loyalty/iiko/customer/create_or_update"
 PATH_BALANCE     = "/api/1/loyalty/balance"
 PATH_REFILL      = "/api/1/customers/refill_balance"
 PATH_ORDERS      = "/api/1/orders/by_phone"
+PATH_LOYALTY_OPS = "/api/1/loyalty/iiko/operations"
+PATH_DELIVERIES_HISTORY = "/api/1/deliveries/history/by_delivery_date_and_phone"
+PATH_COUNTERS    = "/api/1/loyalty/iiko/get_counters"
 
 # 1 — «есть согласие» в iiko
 CONSENT_OK = 1
@@ -473,6 +476,108 @@ class IikoClient:
         })
         return res.json()
 
+    def _format_delivery_datetime(self, dt: datetime) -> str:
+        if dt.tzinfo:
+            dt = dt.astimezone(timezone.utc)
+        base = dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S.%f")
+        return base[:-3]
+
+    async def get_delivery_history_orders(self, phone: str, lookback_days: int,
+                                          date_to: datetime | None = None) -> List[Dict[str, Any]]:
+        """
+        Использует endpoint deliveries/history... для получения заказов по телефону.
+        Возвращает плоский список заказов по всем организациям.
+        """
+        org_id = str(settings.iiko_org_id)
+        end_dt = date_to or datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(days=lookback_days)
+        rows_count = min(max(getattr(settings, "visits_history_rows_count", 200), 1), 200)
+        payload = {
+            "phone": phone,
+            "deliveryDateFrom": self._format_delivery_datetime(start_dt),
+            "deliveryDateTo": self._format_delivery_datetime(end_dt),
+            "organizationIds": [org_id],
+            "rowsCount": rows_count,
+        }
+        try:
+            res = await self._request(PATH_DELIVERIES_HISTORY, payload)
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response else "n/a"
+            body = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.text[:500]
+                except Exception:
+                    body = "<decode failed>"
+            print(
+                f"[IIKO HISTORY ERR] phone={_mask_phone(phone)} status={status} body={body}",
+                flush=True
+            )
+            if exc.response is not None and exc.response.status_code == 404:
+                return []
+            raise
+        data = res.json() or {}
+        orders: List[Dict[str, Any]] = []
+        if isinstance(data, list):
+            orders = data
+        elif isinstance(data, dict):
+            buckets = data.get("ordersByOrganizations") or data.get("ordersByOrganization") or []
+            for bucket in buckets:
+                if isinstance(bucket, dict):
+                    if isinstance(bucket.get("orders"), list):
+                        orders.extend(bucket["orders"])
+                    elif isinstance(bucket.get("items"), list):
+                        orders.extend(bucket["items"])
+        return orders
+
+    async def get_orders_count_last_30_days(self, customer_id: str) -> int:
+        org_id = str(settings.iiko_org_id)
+        payload = {
+            "guestIds": [str(customer_id)],
+            "periods": [PERIOD_LAST_30_DAYS],
+            "metrics": [METRIC_ORDERS_COUNT],
+            "organizationId": org_id,
+        }
+        try:
+            res = await self._request(PATH_COUNTERS, payload)
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else "n/a"
+            body = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.text[:500]
+                except Exception:
+                    body = "<decode failed>"
+            print(
+                f"[IIKO COUNTERS ERR] guest={_mask_uuid(customer_id)} status={status} body={body}",
+                flush=True
+            )
+            if exc.response is not None and exc.response.status_code in (400, 401, 403, 404):
+                return 0
+            raise
+        data = res.json() or {}
+        counters = data.get("counters") if isinstance(data, dict) else None
+        if not isinstance(counters, list):
+            return 0
+        for item in counters:
+            if not isinstance(item, dict):
+                continue
+            guests = item.get("guestId") or item.get("guest") or item.get("guestIds")
+            if guests and str(customer_id) not in str(guests):
+                continue
+            values = item.get("values") or []
+            for val in values:
+                if not isinstance(val, dict):
+                    continue
+                period = val.get("period")
+                metric = val.get("metric")
+                if period == PERIOD_LAST_30_DAYS and metric == METRIC_ORDERS_COUNT:
+                    try:
+                        return int(val.get("value") or 0)
+                    except (TypeError, ValueError):
+                        return 0
+        return 0
+
     async def get_orders_by_phone(self, phone: str, lookback_days: int) -> List[Dict[str, Any]]:
         org_id = str(settings.iiko_org_id)
         since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
@@ -489,3 +594,37 @@ class IikoClient:
             raise
         js = res.json()
         return js if isinstance(js, list) else (js or {}).get("orders", [])
+
+    async def get_loyalty_operations(self, *, phone: str | None = None,
+                                     customer_id: Any | None = None,
+                                     lookback_days: int | None = None) -> List[Dict[str, Any]]:
+        """
+        Возвращает историю операций кошелька (аналог отчёта Journal operations).
+        Требует доступ к /loyalty/iiko/operations.
+        """
+        org_id = str(settings.iiko_org_id)
+        payload: Dict[str, Any] = {"organizationId": org_id}
+        if phone:
+            payload["phone"] = phone
+        if customer_id:
+            payload["customerId"] = str(customer_id)
+        if lookback_days is not None:
+            payload["dateFrom"] = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+        try:
+            res = await self._request(PATH_LOYALTY_OPS, payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code in (401, 404):
+                _dbg("[IIKO OPERATIONS] not available")
+                return []
+            raise
+        data = res.json() or {}
+        if isinstance(data, list):
+            return data
+        for key in ("operations", "items", "loyaltyOperations"):
+            val = data.get(key)
+            if isinstance(val, list):
+                return val
+        return []
+# counters enums
+PERIOD_LAST_30_DAYS = 0   # официальная константа iiko «последние 30 дней»
+METRIC_ORDERS_COUNT = "OrdersCount"   # enum iiko для количества заказов
