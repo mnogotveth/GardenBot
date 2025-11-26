@@ -248,6 +248,7 @@ PATH_ORDERS      = "/api/1/orders/by_phone"
 PATH_LOYALTY_OPS = "/api/1/loyalty/iiko/operations"
 PATH_DELIVERIES_HISTORY = "/api/1/deliveries/history/by_delivery_date_and_phone"
 PATH_COUNTERS    = "/api/1/loyalty/iiko/get_counters"
+PATH_TRANSACTIONS = "/api/1/loyalty/iiko/customer/transactions/by_date"
 
 # 1 — «есть согласие» в iiko
 CONSENT_OK = 1
@@ -578,6 +579,54 @@ class IikoClient:
                         return 0
         return 0
 
+    async def get_customer_transactions(self, customer_id: str,
+                                         date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        org_id = str(settings.iiko_org_id)
+        payload = {
+            "customerId": str(customer_id),
+            "organizationId": org_id,
+            "dateFrom": date_from.isoformat(),
+            "dateTo": date_to.isoformat(),
+            "pageNumber": 0,  # API использует нумерацию страниц с нуля
+            "pageSize": 100,
+        }
+        transactions: list[dict] = []
+        retries = 3
+        while True:
+            try:
+                res = await self._request(PATH_TRANSACTIONS, payload)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response else "n/a"
+                body = ""
+                if exc.response is not None:
+                    try:
+                        body = exc.response.text[:500]
+                    except Exception:
+                        body = "<decode failed>"
+                print(f"[IIKO TX ERR] guest={_mask_uuid(customer_id)} status={status} body={body}", flush=True)
+                if exc.response is not None and exc.response.status_code in (401, 403, 404):
+                    break
+                if exc.response is not None and exc.response.status_code == 502:
+                    retries -= 1
+                    if retries <= 0:
+                        break
+                    continue
+                raise
+            except httpx.HTTPError:
+                retries -= 1
+                if retries <= 0:
+                    raise
+                continue
+            data = res.json() or {}
+            page_items = data.get("transactions") if isinstance(data, dict) else data
+            if not page_items:
+                break
+            transactions.extend(page_items)
+            if len(page_items) < payload["pageSize"]:
+                break
+            payload["pageNumber"] += 1
+        return transactions
+
     async def get_orders_by_phone(self, phone: str, lookback_days: int) -> List[Dict[str, Any]]:
         org_id = str(settings.iiko_org_id)
         since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
@@ -628,3 +677,6 @@ class IikoClient:
 # counters enums
 PERIOD_LAST_30_DAYS = 0   # официальная константа iiko «последние 30 дней»
 METRIC_ORDERS_COUNT = "OrdersCount"   # enum iiko для количества заказов
+# transaction types
+TRANSACTION_TYPES_SPENT = ("BALANCE_CHANGE", "WRITE_OFF", "PAYMENT", "BALANCE CHARGE")
+TRANSACTION_TYPES_EARNED = ("BALANCE_CHANGE", "ACCRUAL", "BALANCE TOPUP", "TOP_UP")

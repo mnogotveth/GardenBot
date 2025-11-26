@@ -1,8 +1,5 @@
 import asyncio
-import json
-import uuid
-from datetime import datetime, timezone, timedelta
-import asyncpg
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
@@ -19,7 +16,7 @@ from .config import settings
 from .utils import normalize_phone
 from .repo import Repo
 from .iiko_client import IikoClient
-from .scheduler import start_scheduler  # оставляем фичу
+from .scheduler_tx import start_scheduler
 
 # ----- подписи кнопок -----
 BTN_OPEN_POLICY = "📄 Политика"
@@ -30,9 +27,6 @@ BTN_MENU        = "📖 Меню"
 BTN_BALANCE     = "💰 Баланс"
 
 CB_CONSENT_OK   = "consent_ok"
-
-BALANCE_VISIT_SOURCE = "balance_change"
-BALANCE_VISIT_WINDOW = timedelta(hours=1)
 
 # ----- клавиатуры -----
 def kb_share_phone() -> ReplyKeyboardMarkup:
@@ -85,34 +79,8 @@ dp = Dispatcher()
 
 repo = Repo(settings.database_url)
 iiko = IikoClient()
-
-
-async def _register_balance_visit(user: asyncpg.Record | dict, delta: int):
-    now = datetime.now(timezone.utc)
-    spent = abs(delta) if delta < 0 else 0
-    earned = delta if delta > 0 else 0
-    last = await repo.get_last_balance_visit(user["tg_id"])
-    last_time = None
-    if last:
-        last_time = last["visited_at"] if "visited_at" in last else None
-    if last_time and now - last_time <= BALANCE_VISIT_WINDOW:
-        new_spent = (last["bonuses_spent"] or 0) + spent
-        new_earned = (last["bonuses_earned"] or 0) + earned
-        await repo.update_visit_amounts(last["id"], new_spent, new_earned, now)
-        return
-
-    order_id = str(uuid.uuid4())
-    import json
-    meta = json.dumps({"source": BALANCE_VISIT_SOURCE, "delta": delta})
-    await repo.add_visit(
-        tg_id=user["tg_id"],
-        order_id=order_id,
-        visited_at=now,
-        bonuses_spent=spent,
-        bonuses_earned=earned,
-        amount=0.0,
-        meta=meta
-    )
+# сохраняем APScheduler, чтобы его не собрал GC и не остановил синхронизацию визитов
+scheduler: AsyncIOScheduler | None = None
 
 async def send_policy_pdf(chat_id: int):
     caption = (
@@ -273,15 +241,7 @@ async def balance(m: Message):
         return
     try:
         new_balance = await iiko.get_bonus_balance(u["iiko_customer_id"])
-        prev_balance = int(u.get("bonus_balance") or 0)
-        delta = new_balance - prev_balance
         await repo.update_balance(u["tg_id"], new_balance)
-        if delta != 0:
-            try:
-                await _register_balance_visit(u, delta)
-            except Exception as inner:
-                import traceback
-                print("[WARN] balance visit register failed:", inner, traceback.format_exc(), flush=True)
         await m.answer(f"Текущий баланс: {new_balance} бонусов ✅", reply_markup=kb_main())
     except Exception as e:
         import traceback
@@ -316,7 +276,7 @@ async def visits(m: Message):
             )
             return
         txt = "\n".join(
-            f"• {v['visited_at']:%d.%m.%Y} — {float(v['amount'] or 0):.2f}₽, "
+            f"• {v['visited_at']:%d.%m.%Y} "
             f"списано {v['bonuses_spent']}, начислено {v['bonuses_earned']}"
             for v in items
         )
@@ -346,8 +306,10 @@ async def open_menu(m: Message):
 async def main():
     await repo.connect()
     await repo.migrate()
-    start_scheduler(repo, iiko)
+    global scheduler
+    scheduler = start_scheduler(repo, iiko)
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
+    print("=== GARDEN BOT STARTED FROM DOCKER ===")
     asyncio.run(main())

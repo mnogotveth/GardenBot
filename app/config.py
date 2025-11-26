@@ -15,7 +15,7 @@ class Settings(BaseModel):
     welcome_bonus_amount: int = int(os.getenv("WELCOME_BONUS_AMOUNT", "100"))
     max_pay_with_bonus_pct: int = int(os.getenv("MAX_PAY_WITH_BONUS_PCT", "50"))
 
-    visits_poll_interval_seconds: int = int(os.getenv("VISITS_POLL_INTERVAL_SECONDS", "300"))
+    visits_poll_interval_seconds: int = int(os.getenv("VISITS_POLL_INTERVAL_SECONDS", "60"))
     visits_lookback_days: int = int(os.getenv("VISITS_LOOKBACK_DAYS", "30"))
 
     menu_url: str = os.getenv("MENU_URL", "")

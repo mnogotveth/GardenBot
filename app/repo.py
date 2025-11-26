@@ -87,25 +87,6 @@ class Repo:
         async with self.pool.acquire() as c:
             return await c.fetch(q, tg_id, limit)
 
-    async def get_last_balance_visit(self, tg_id: int) -> Optional[asyncpg.Record]:
-        q = """
-        SELECT * FROM visits
-        WHERE tg_id=$1 AND meta ->> 'source' = 'balance_change'
-        ORDER BY visited_at DESC
-        LIMIT 1
-        """
-        async with self.pool.acquire() as c:
-            return await c.fetchrow(q, tg_id)
-
-    async def update_visit_amounts(self, visit_id: int, bonuses_spent: int,
-                                   bonuses_earned: int, visited_at: datetime):
-        q = """
-        UPDATE visits
-        SET bonuses_spent=$2, bonuses_earned=$3, visited_at=$4
-        WHERE id=$1
-        """
-        async with self.pool.acquire() as c:
-            await c.execute(q, visit_id, bonuses_spent, bonuses_earned, visited_at)
 
     # --- Consent ---
     async def set_consent(self, tg_id: int):
