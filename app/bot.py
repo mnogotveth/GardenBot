@@ -19,12 +19,12 @@ from .iiko_client import IikoClient
 from .scheduler_tx import start_scheduler
 
 # ----- подписи кнопок -----
-BTN_OPEN_POLICY = "📄 Политика"
+BTN_OPEN_POLICY = "📝 Политика"
 BTN_CONSENT     = "✅ Я прочитал и согласен"
-BTN_SHARE       = "Поделиться номером"
+BTN_SHARE       = "📱 Поделиться номером"
 BTN_VISITS      = "🧾 Посещения"
 BTN_MENU        = "📖 Меню"
-BTN_BALANCE     = "💰 Баланс"
+BTN_BALANCE     = "💳 Баланс"
 
 CB_CONSENT_OK   = "consent_ok"
 
@@ -263,7 +263,7 @@ async def visits(m: Message):
             import traceback
             print("[ERR] visits counters:", e, traceback.format_exc(), flush=True)
     try:
-        items = await repo.list_visits(m.from_user.id, limit=10)
+        items = await repo.list_visits_by_day(m.from_user.id, limit=10)
         if not items:
             header = ""
             if visits_count_30d:
@@ -276,8 +276,7 @@ async def visits(m: Message):
             )
             return
         txt = "\n".join(
-            f"• {v['visited_at']:%d.%m.%Y} "
-            f"списано {v['bonuses_spent']}, начислено {v['bonuses_earned']}"
+            f"• {v['day']:%d.%m.%Y} списано {int(v['spent'] or 0)}, начислено {int(v['earned'] or 0)}"
             for v in items
         )
         header = ""

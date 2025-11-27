@@ -87,6 +87,21 @@ class Repo:
         async with self.pool.acquire() as c:
             return await c.fetch(q, tg_id, limit)
 
+    async def list_visits_by_day(self, tg_id: int, limit: int = 10) -> List[asyncpg.Record]:
+        q = """
+        SELECT date_trunc('day', visited_at) AS day,
+               SUM(bonuses_spent) AS spent,
+               SUM(bonuses_earned) AS earned,
+               SUM(amount) AS amount
+        FROM visits
+        WHERE tg_id=$1
+        GROUP BY day
+        ORDER BY day DESC
+        LIMIT $2
+        """
+        async with self.pool.acquire() as c:
+            return await c.fetch(q, tg_id, limit)
+
 
     # --- Consent ---
     async def set_consent(self, tg_id: int):

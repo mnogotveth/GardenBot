@@ -36,6 +36,11 @@ def _amount_from_tx(tx: dict) -> float:
     return float(tx.get("orderSum") or tx.get("checkSum") or tx.get("amount") or tx.get("sum") or 0)
 
 
+def _is_welcome_bonus_tx(tx: dict) -> bool:
+    comment = str(tx.get("comment") or tx.get("description") or "").lower()
+    return "welcome bonus via tg" in comment
+
+
 def _json_safe(value):
     if isinstance(value, dict):
         return {k: _json_safe(v) for k, v in value.items()}
@@ -81,6 +86,8 @@ async def sync_visits(repo: Repo, iiko: IikoClient):
             print(f"[visits-sync] transactions failed for {customer_id}: {exc}", flush=True)
             continue
         for tx in transactions:
+            if _is_welcome_bonus_tx(tx):
+                continue
             tx_id = _build_tx_id(tx)
             if await repo.visit_exists(u["tg_id"], tx_id):
                 continue
