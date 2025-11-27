@@ -37,7 +37,14 @@ def _amount_from_tx(tx: dict) -> float:
 
 
 def _is_welcome_bonus_tx(tx: dict) -> bool:
-    comment = str(tx.get("comment") or tx.get("description") or "").lower()
+    comment_sources = (
+        tx.get("comment"),
+        tx.get("description"),
+        tx.get("operationComment"),
+        tx.get("operationDescription"),
+        tx.get("details"),
+    )
+    comment = " ".join(str(part or "") for part in comment_sources).strip().lower()
     return "welcome bonus via tg" in comment
 
 

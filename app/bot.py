@@ -2,6 +2,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
+from aiogram.enums import ParseMode
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -74,7 +75,7 @@ def ikb_menu_url():
     return None
 
 # ----- init -----
-bot = Bot(settings.bot_token)
+bot = Bot(settings.bot_token, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
 repo = Repo(settings.database_url)
@@ -242,7 +243,7 @@ async def balance(m: Message):
     try:
         new_balance = await iiko.get_bonus_balance(u["iiko_customer_id"])
         await repo.update_balance(u["tg_id"], new_balance)
-        await m.answer(f"Текущий баланс: {new_balance} бонусов ✅", reply_markup=kb_main())
+        await m.answer(f"Текущий баланс: {new_balance} бонусов 🌿", reply_markup=kb_main())
     except Exception as e:
         import traceback
         print("[ERR] /balance:", e, traceback.format_exc(), flush=True)
@@ -276,7 +277,7 @@ async def visits(m: Message):
             )
             return
         txt = "\n".join(
-            f"• {v['day']:%d.%m.%Y} списано {int(v['spent'] or 0)}, начислено {int(v['earned'] or 0)}"
+            f"• <b>{v['day']:%d.%m.%Y}</b>\n списано {int(v['spent'] or 0)}, начислено {int(v['earned'] or 0)}"
             for v in items
         )
         header = ""
