@@ -6,6 +6,7 @@ import json
 from .repo import Repo
 from .iiko_client import IikoClient
 from .config import settings
+from .utils import has_real_customer_id
 
 
 def _normalize_dt(val):
@@ -85,10 +86,10 @@ async def sync_visits(repo: Repo, iiko: IikoClient):
     since = now - timedelta(days=settings.visits_lookback_days)
     for u in users:
         customer_id = u.get("iiko_customer_id")
-        if not customer_id:
+        if not has_real_customer_id(customer_id):
             continue
         try:
-            transactions = await iiko.get_customer_transactions(customer_id, since, now)
+            transactions = await iiko.get_customer_transactions(str(customer_id), since, now)
         except Exception as exc:
             print(f"[visits-sync] transactions failed for {customer_id}: {exc}", flush=True)
             continue

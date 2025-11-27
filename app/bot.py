@@ -14,7 +14,7 @@ from aiogram.types import (
 )
 
 from .config import settings
-from .utils import normalize_phone
+from .utils import normalize_phone, has_real_customer_id, PLACEHOLDER_CUSTOMER_ID
 from .repo import Repo
 from .iiko_client import IikoClient
 from .scheduler_tx import start_scheduler
@@ -110,7 +110,7 @@ async def ensure_registered(m: Message):
             await repo.upsert_user(
                 tg_id=m.from_user.id,
                 phone="+",
-                iiko_customer_id="00000000-0000-0000-0000-000000000000",
+                iiko_customer_id=PLACEHOLDER_CUSTOMER_ID,
                 bonus_balance=0
             )
         return None
@@ -128,7 +128,7 @@ async def start(m: Message):
             await repo.upsert_user(
                 tg_id=m.from_user.id,
                 phone="+",
-                iiko_customer_id="00000000-0000-0000-0000-000000000000",
+                iiko_customer_id=PLACEHOLDER_CUSTOMER_ID,
                 bonus_balance=0
             )
         return
@@ -143,7 +143,7 @@ async def on_consent_ok(cq: CallbackQuery):
     await repo.set_consent(cq.from_user.id)
     # пробуем проставить согласие и в iiko, если у нас уже известен клиент
     u = await repo.get_user_by_tg(cq.from_user.id)
-    if u and u.get("iiko_customer_id"):
+    if u and has_real_customer_id(u.get("iiko_customer_id")):
         try:
             ok = await iiko.set_consent_true(customer_id=str(u["iiko_customer_id"]), phone=u.get("phone"))
             if not ok:
@@ -172,7 +172,7 @@ async def manual_consent(m: Message):
     await repo.set_consent(m.from_user.id)
     # если клиента уже знаем — продублируем согласие в iiko
     u = await repo.get_user_by_tg(m.from_user.id)
-    if u and u.get("iiko_customer_id"):
+    if u and has_real_customer_id(u.get("iiko_customer_id")):
         try:
             await iiko.set_consent_true(customer_id=str(u["iiko_customer_id"]), phone=u.get("phone"))
         except Exception as e:
@@ -240,8 +240,15 @@ async def balance(m: Message):
     u = await ensure_registered(m)
     if not u:
         return
+    customer_id = u.get("iiko_customer_id")
+    if not has_real_customer_id(customer_id):
+        await m.answer(
+            "Чтобы узнать баланс, поделитесь номером телефона через кнопку ниже 👇",
+            reply_markup=kb_share_phone()
+        )
+        return
     try:
-        new_balance = await iiko.get_bonus_balance(u["iiko_customer_id"])
+        new_balance = await iiko.get_bonus_balance(customer_id)
         await repo.update_balance(u["tg_id"], new_balance)
         await m.answer(f"Текущий баланс: {new_balance} бонусов 🌿", reply_markup=kb_main())
     except Exception as e:
@@ -256,13 +263,18 @@ async def visits(m: Message):
     if not u:
         return
     customer_id = u.get("iiko_customer_id")
+    if not has_real_customer_id(customer_id):
+        await m.answer(
+            "Чтобы увидеть историю посещений, поделитесь номером телефона через кнопку ниже 👇",
+            reply_markup=kb_share_phone()
+        )
+        return
     visits_count_30d = 0
-    if customer_id:
-        try:
-            visits_count_30d = await iiko.get_orders_count_last_30_days(str(customer_id))
-        except Exception as e:
-            import traceback
-            print("[ERR] visits counters:", e, traceback.format_exc(), flush=True)
+    try:
+        visits_count_30d = await iiko.get_orders_count_last_30_days(str(customer_id))
+    except Exception as e:
+        import traceback
+        print("[ERR] visits counters:", e, traceback.format_exc(), flush=True)
     try:
         items = await repo.list_visits_by_day(m.from_user.id, limit=10)
         if not items:
